@@ -638,18 +638,19 @@ int findRoughValues() {
 	crfIterations++;
   }
   
-  
   ///////////////////////
   //START QCOMP TESTING//
   ///////////////////////
+  //this section is under commented because it was just written and I was tired
   //print the final crf value both to cli and to log
   snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\nFinal Crf Value: %g", crf);
   fputs(nextPartOfLog, b264log);
   printf(nextPartOfLog);
   
+  //this loop tries to find the appropriate qcomp value
   int qcompIteration = 1;
   int newdb = db;
-  //this loop tries to find the appropriate qcomp value
+  int qcompState = 0; //0 = untested, 1 = moving in a + direction, -1 = moving in a - direction, 2 = have been moving in a positive direction, -2 = have been moving in a negative direction
   while(qcompIteration <= 5) {
     //right now we are just going to try and approximate the bitrate by moving the crf an appropriate amount. This will cause problems if the crf approximation is off. In the future, algorithms can be added/changed so that the bitrate is closer.
 	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\nStarting qcomp test %u", qcompIteration);
@@ -657,9 +658,33 @@ int findRoughValues() {
     printf(nextPartOfLog);
 	
 	//move qcomp .05, then adjust crf by .1
-	qcomp += .05;
-	crf += .1;
-	//qcomp magic happens here!
+	if(qcompState == 0) {
+	  qcomp += .05;
+	  crf += .1;
+	  qcompState = 1;
+	} else {
+	  if(newdb > db && qcompState > 0) {
+	    qcomp += .05;
+		crf += .1;
+		qcompState = 2;
+	  } else if(newdb > db && qcompState < 0) {
+	    qcomp -= .05;
+		crf -= .1;
+		qcompState = -2;
+	  } else if(newdb < db && qcompState == 1) {
+	    qcomp -= .1;
+		crf -= .2;
+		qcompState = -1;
+	  } else if(newdb < db && qcompState < 0) {
+	    qcomp += .05;
+		crf += .1;
+		break;
+	  } else if(newdb < db && qcompState > 0) {
+	    qcomp -= .05;
+		crf -= .1;
+		break;
+	  }
+	}
 	
     snprintf(x264Command, sizeof(x264Command), "%s %s -o - | %s --preset placebo --rc-lookahead 250 --subme 11 --deblock%i:%i --aq-mode %u --aq-strength %g --qcomp %g --me %s --merange %u --ref %u --bframes %u --crf %g --psy-rd %g:%g --ssim -o %s/qcomptest%u.mkv - --demuxer y4m NUL 2>&1", avs2yuvloc, roughAvsName, x264loc, deblock_alpha, deblock_beta, aqmode, aqs, qcomp, me, merange, ref, bframes, crf, psyr, psyt, logdir, qcompIterations);
 	
@@ -682,19 +707,8 @@ int findRoughValues() {
 	
   	  if(sequenceFound == 1) {
         findSequence("(", 1);
-	    db = atof(readLineFromInput);
+	    newdb = atof(readLineFromInput);
    	  }
-    }
-	
-	//this loop looks for the encode bitrate
-	sequenceFound = 0;
-    while(sequenceFound == 0) {
-      fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
-	  fputs(readLineFromInput, x264log);
-      findSequence("kb/s:", 5);
-	  
-	  if(sequenceFound == 1)
-        bitrate = atof(readLineFromInput);
     }
 	
 	//print the rest of the output to the log
