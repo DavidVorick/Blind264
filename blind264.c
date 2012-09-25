@@ -462,7 +462,7 @@ int findRoughValues() {
   int startCredits = framecount*.09;
   int endCredits = framecount*.91;
   int selectEvery = framecount*.085;
-  snprintf(changingAvs, sizeof(changingAvs), "%s\ntrim(%u,%u)\nSelectRangeEvery(%u,400,0)\nSpline36Resize(%u,%u)", changingAvs, startCredits, endCredits, selectEvery, encodeWidth, encodeHeight);
+  snprintf(changingAvs, sizeof(changingAvs), "%s\ntrim(%u,%u)\nSelectRangeEvery(%u,4,0)\nSpline36Resize(%u,%u)", changingAvs, startCredits, endCredits, selectEvery, encodeWidth, encodeHeight);
   
   //create the variable that will name the avs file to be used while doing the bframes test
   char roughAvsName[800];
@@ -686,14 +686,14 @@ int findRoughValues() {
 	  }
 	}
 	
-    snprintf(x264Command, sizeof(x264Command), "%s %s -o - | %s --preset placebo --rc-lookahead 250 --subme 11 --deblock%i:%i --aq-mode %u --aq-strength %g --qcomp %g --me %s --merange %u --ref %u --bframes %u --crf %g --psy-rd %g:%g --ssim -o %s/qcomptest%u.mkv - --demuxer y4m NUL 2>&1", avs2yuvloc, roughAvsName, x264loc, deblock_alpha, deblock_beta, aqmode, aqs, qcomp, me, merange, ref, bframes, crf, psyr, psyt, logdir, qcompIterations);
+    snprintf(x264Command, sizeof(x264Command), "%s %s -o - | %s --preset placebo --rc-lookahead 250 --subme 11 --deblock%i:%i --aq-mode %u --aq-strength %g --qcomp %g --me %s --merange %u --ref %u --bframes %u --crf %g --psy-rd %g:%g --ssim -o %s/qcomptest%u.mkv - --demuxer y4m NUL 2>&1", avs2yuvloc, roughAvsName, x264loc, deblock_alpha, deblock_beta, aqmode, aqs, qcomp, me, merange, ref, bframes, crf, psyr, psyt, logdir, qcompIteration);
 	
 	//print to b264log the command and context information
-    snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\nStarting Qcomp Test %u\nQcomp Test Command: %s", qcompIterations, x264Command);
+    snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\nStarting Qcomp Test %u\nQcomp Test Command: %s", qcompIteration, x264Command);
 	fputs(nextPartOfLog, b264log);
 	
 	//create the x264 log so that one can start printing to it.
-	snprintf(x264logName, sizeof(x264logName), "%s/qcomptest%u.log", logdir, qcompIterations);
+	snprintf(x264logName, sizeof(x264logName), "%s/qcomptest%u.log", logdir, qcompIteration);
     x264Process = popen(x264Command, "r");
 	x264log = fopen(x264logName, "w");
 	
@@ -718,6 +718,7 @@ int findRoughValues() {
 	  fputs(readLineFromInput, x264log);
 	  findSequence("encoded", 7);
     }
+	qcompIteration++;
   }
 }
 

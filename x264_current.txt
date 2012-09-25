@@ -1,0 +1,10 @@
+--deblock -3:-3
+--aq-mode 1
+--aq-strength 1.0
+--psy-rd 0.9:0.0
+--qcomp .7
+--me umh
+--merange 16
+--ref 4
+--bframes 16
+--crf 16.5
