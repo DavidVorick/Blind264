@@ -3,7 +3,7 @@
 --logdir C:/b264/logs
 --x264def C:/b264/x264_defaults.txt
 --x264cur C:/b264/x264_active.txt
---avs C:/A/etv/etvb264.avs
+--avs C:/A/pap/papb.avs
 --bft 0.5
 --psize 480
 --mode 2
@@ -11,7 +11,7 @@
 --aq-mode 1
 --aq-strength 1.0
 --psy-rd 0.9:0.0
---qcomp .7
+--qcomp .65
 --me umh
 --merange 16
 --ref 4

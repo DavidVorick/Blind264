@@ -8,6 +8,7 @@
 //to-do list:
 
 //1. Impliment aq-mode. This is mostly a blind guess :(, but it seems that when the bitrates are close, aq-mode 2 is superior, otherwise aq-mode 1 is superior.
+     //actually, aq-mode 1 seems to be superior very often. Perhaps aq-2 is inferior the same way mbtree is inferior.
 //2. Impliment aq-strength. My instinctual guess is that higher bitrates suggest the need for a lower aq-strength, and vice-versa. 
      //new evidence actually shows that this is probably a bad idea.
 //3. Attempt psy-rd. Nobody has any idea how to do this, but some stabs in the dark are listed below
@@ -346,15 +347,11 @@ int readCliArgs(int argc, char* argv[]) {
   return 1;
 }
 
-//findEasyValues() is called by mode 1 and mode 2
 //findEasyValues() is called such because it doesn't use x264, and finishes in seconds
-//findEasyValues() is mainly to save you manual work, finding the following: 
-//the original resolution of the source video
-//the framerate of the source video
-//the framecount of the source video
-//the aspect ratio of the source video
-//the most accurate resize values given --psize
-//the maximum number of compliant ref frames
+//findEasyValues() finds
+//the resolution of the encode given the desired --psize, as well as the resulting aspect ratios of both the source and encode
+//and the maximum number of compliant ref frames
+//for findRoughValues() it also finds the framerate
 int findEasyValues() {
   //call avs2yuv and get basic information about the video
   char avs2yuvCommand[500];
@@ -458,7 +455,7 @@ int findRoughValues() {
   int startCredits = framecount*.09;
   int endCredits = framecount*.91;
   int selectEvery = framecount*.085;
-  snprintf(changingAvs, sizeof(changingAvs), "%s\ntrim(%u,%u)\nSelectRangeEvery(%u,8,0)\nSpline36Resize(%u,%u)", changingAvs, startCredits, endCredits, selectEvery, encodeWidth, encodeHeight);
+  snprintf(changingAvs, sizeof(changingAvs), "%s\ntrim(%u,%u)\nSelectRangeEvery(%u,400,0)\nSpline36Resize(%u,%u)", changingAvs, startCredits, endCredits, selectEvery, encodeWidth, encodeHeight);
   
   //create the variable that will name the avs file to be used while doing the bframes test
   char roughAvsName[800];
@@ -477,21 +474,34 @@ int findRoughValues() {
   snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\nBframes Command: %s", x264Command);
   fputs(nextPartOfLog, b264log);
 
-  //print all x264 output to it's own log file, do not crowd out b264log with the output
+  //print all x264 output to it's own log file, and start the process
   snprintf(x264logName, sizeof(x264logName), "%s/bframestest.log", logdir);
   x264log = fopen(x264logName, "w");
-  
-  //call x264
   x264Process = popen(x264Command, "r");
   
   //clears sequenceFound, which is probably 1. This is only so that the loop starts in the first place.
+  //the first 2 while loops keep x264 from outputting 100s of current bitrate statements. Comment them out to see what I mean..
   sequenceFound = 0;
-  while(sequenceFound == 0) {  //sequenceFound will be 0 if findSequence fails to find the string that is being looked for
-    //read the next line from x264output, print it to the log
-	//but not any of the 1000s of lines about the current bitrate (if statment)
+  while(sequenceFound == 0) {
 	fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
-	if(readLineFromInput[0] < 48 || readLineFromInput[0] > 57)
-	  fputs(readLineFromInput, x264log);
+    fputs(readLineFromInput, x264log);
+	findSequence("profile", 7);
+  } 
+  
+  sequenceFound = 0;
+  while(sequenceFound == 0) {
+    fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+	findSequence("x264", 4);
+  }
+  
+  fputs("\nx264", x264log);
+  fputs(readLineFromInput, x264log);
+  fputs("\n", x264log);
+  
+  sequenceFound = 0;
+  while(sequenceFound == 0) {  
+	fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+	fputs(readLineFromInput, x264log);
 	
 	//search for the line of code with the statistics about consecutive bframes
     findSequence("B-frames: ", 10);
@@ -555,7 +565,7 @@ int findRoughValues() {
     snprintf(x264Command, sizeof(x264Command), "%s %s -o - | %s --preset placebo --no-mbtree --rc-lookahead 250 --subme 11 --deblock %i:%i --aq-mode %u --aq-strength %g --qcomp %g --me %s --merange %u --ref %u --bframes %u --crf %g --no-psy --ssim -o %s/crftest%u.mkv - --demuxer y4m NUL 2>&1", avs2yuvloc, roughAvsName, x264loc, deblock_alpha, deblock_beta, aqmode, aqs, qcomp, me, merange, ref, bframes, crf, logdir, crfIterations);
     
 	//print to b264log the command and context information
-    snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\n\nStarting Crf Test %u, bitrate %g\n", crfIterations, bitrate);
+    snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\n\nStarting Crf Test %u, previous bitrate %g, trying crf %g\n", crfIterations, bitrate, crf);
 	printf(nextPartOfLog);
 	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "%sCrf Test Command: %s", nextPartOfLog, x264Command);
 	fputs(nextPartOfLog, b264log);
@@ -565,14 +575,29 @@ int findRoughValues() {
     x264Process = popen(x264Command, "r");
 	x264log = fopen(x264logName, "w");
 	
-	//clear sequenceFound to enter the loop, and start collecting log information
-	//collection in this loop stops when the db information is found
+	//clears sequenceFound, which is probably 1. This is only so that the loop starts in the first place.
+    //the first 2 while loops keep x264 from outputting 100s of current bitrate statements. Comment them out to see what I mean..
     sequenceFound = 0;
     while(sequenceFound == 0) {
-	  //stop x264 from printing 1000s of lines of output about the current bitrate
+	  fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+      fputs(readLineFromInput, x264log);
+	  findSequence("profile", 7);
+    } 
+  
+    sequenceFound = 0;
+    while(sequenceFound == 0) {
       fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
-	  if(readLineFromInput[0] < 48 || readLineFromInput[0] > 57)
-	    fputs(readLineFromInput, x264log);
+	  findSequence("x264", 4);
+    }
+  
+    fputs("\nx264", x264log);
+    fputs(readLineFromInput, x264log);
+    fputs("\n", x264log);
+  
+    sequenceFound = 0;
+    while(sequenceFound == 0) {
+      fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+	  fputs(readLineFromInput, x264log);
 		
       findSequence("SSIM Mean", 9);
   	  if(sequenceFound == 1) {
@@ -600,12 +625,16 @@ int findRoughValues() {
 	  findSequence("encoded", 7);
     }
 	
+	//x264Process has terminated and all the output has been stored in the log
+    fclose(x264log);
+    pclose(x264Process); 
+	
 	//we are looking for a specific db relative to the bits per pixel (the number of bits in the whole video divided by the number of pixels in the whole video - which is the resolution * the number of frames)
 	//a good bpp is usually between .15 and .35, though values outside of this are not uncommon b/c videos vary drastically in compressability
 	//if the bpp is high and the db is high, that probably means the video is more compressible, and so bits can be removed. If the bppf is low and the db is low, that probably means that the video is less compressible and needs more bits.
 	//the function is linear such that as a video has more bits, the target db for that video goes down.
 	//the equation, which I would typically render in 1 line of code, has been changed to 5 lines of code so that it's more clear how everything works.
-	float dbAtZeroBitrate = 21.9;
+	float dbAtZeroBitrate = 20.5;
 	float dbReductionPerIncreaseInBPP = 1.4;
 	float adjustmentConstant = 1.5;
 	float bpp = (bitrate/framerate)/(encodeWidth*encodeHeight)*8192;//without the 8192, we are actually measuring kilobits per pixel
@@ -617,7 +646,7 @@ int findRoughValues() {
 	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\ndbAtZeroBitrate: %g\ndbReductionPerIncreaseInBPP: %g\nadjustmentConstant: %g\nbppf: %g\ndb: %g\ndesiredDBatCurrentBitrate: %g\ncrfAdjustment: %g\nold crf: %g\nnew crf: %g\nbitrate: %g", dbAtZeroBitrate, dbReductionPerIncreaseInBPP, adjustmentConstant, bpp, db, desiredDBatCurrentBitrate, crfAdjustment, crf, crf+crfAdjustment, bitrate);
 	fputs(nextPartOfLog, b264log);
 	
-	//if the variance is less than .4, we are done, otherwise finishing adjusting
+	//if the variance is less than .4, we are done
 	if(crfAdjustment > 0) {
 	  if(crfAdjustment < .4)
 	    crfIterations = 3; //this will cause the loop to terminate
@@ -641,15 +670,13 @@ int findRoughValues() {
   
   //this loop tries to find the appropriate qcomp value
   int qcompIteration = 1;
-  float newdb;
-  int qcompState = 1; //1 = moving in a + direction, -1 = moving in a - direction, 2 = have been moving in a positive direction
-  
-  //we can use the information from the most recent crf test as the first qcomp test, so qcomp and crf can be updated even before entering the loop to save 1 iteration
-  qcomp += .05;
-  crf += .1;
-  while(qcompIteration <= 5) {
+  float newdb = 0;
+  int qcompState = 0; //1 = moving in a + direction, -1 = moving in a - direction, 2 = have been moving in a positive direction, 0 means there is no previous encode to compare to
+  bitrate = 0;
+  db = 0;
+  while(qcompIteration <= 4) {
     //right now we are just going to try and approximate the bitrate by moving the crf an appropriate amount. This will cause problems if the crf approximation is off. In the future, algorithms can be added/changed so that the bitrate is closer.
-	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\n\nStarting Qcomp Test %u\n", qcompIteration);
+	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\n\nStarting Qcomp Test %u, qcomp %g\n", qcompIteration, qcomp);
     fputs(nextPartOfLog, b264log);
     printf(nextPartOfLog);
 	
@@ -664,14 +691,29 @@ int findRoughValues() {
     x264Process = popen(x264Command, "r");
 	x264log = fopen(x264logName, "w");
 	
-	//clear sequenceFound to enter the loop, and start collecting log information
-	//collection in this loop stops when the db information is found
+	//clears sequenceFound, which is probably 1. This is only so that the loop starts in the first place.
+    //the first 2 while loops keep x264 from outputting 100s of current bitrate statements. Comment them out to see what I mean..
     sequenceFound = 0;
     while(sequenceFound == 0) {
-      //stop x264 from printing 1000s of lines of output about the current bitrate
+	  fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+      fputs(readLineFromInput, x264log);
+	  findSequence("profile", 7);
+    } 
+  
+    sequenceFound = 0;
+    while(sequenceFound == 0) {
       fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
-	  if(readLineFromInput[0] < 48 || readLineFromInput[0] > 57)
-	    fputs(readLineFromInput, x264log);
+	  findSequence("x264", 4);
+    }
+  
+    fputs("\nx264", x264log);
+    fputs(readLineFromInput, x264log);
+    fputs("\n", x264log);
+  
+    sequenceFound = 0;
+    while(sequenceFound == 0) {
+      fgets(readLineFromInput, sizeof(readLineFromInput), x264Process);
+	  fputs(readLineFromInput, x264log);
 		
       findSequence("SSIM Mean", 9);
   	  if(sequenceFound == 1) {
@@ -687,35 +729,47 @@ int findRoughValues() {
 	  fputs(readLineFromInput, x264log);
 	  findSequence("encoded", 7);
     }
+	
+	//x264Process has terminated and all the output has been stored in the log
+    fclose(x264log);
+    pclose(x264Process);
+	
+	snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\ndb: %g\nnewdb: %g", db, newdb);
+	fputs(nextPartOfLog, b264log);
 
 	//this part is a work in progress
 	//no additional comments at this time
-	if(newdb > db && qcompState > 0) {
-	  qcomp += .05;
-	  crf += .1;
+	float standardChangeInCrf = .125;
+	float standardChangeInQcomp = .05;
+	if(qcompState == 0) { //first iteration only
+	  qcompState = 1;
+	  qcomp += standardChangeInQcomp;
+	  crf += standardChangeInCrf;
+	  db = newdb;
+	}else if(newdb > db && qcompState > 0) { //qcomp has been growing, and should keep growing as indicated by newdb vs. db
+	  qcomp += standardChangeInQcomp;
+	  crf += standardChangeInCrf;
 	  qcompState = 2;
-	} else if(newdb > db && qcompState < 0) {
-	  qcomp -= .05;
-	  crf -= .1;
+	  db = newdb;
+	} else if(newdb > db && qcompState < 0) { //qcomp has been shrinking, and should keep shrinking as indicated by newdb vs. db
+	  qcomp -= standardChangeInQcomp;
+	  crf -= standardChangeInCrf;
 	  qcompState = -2;
-	} else if(newdb < db && qcompState == 1) {
-	  qcomp -= .1;
-	  crf -= .2;
+	  db = newdb;
+	} else if(newdb < db && qcompState == 1) { //second iteration only, and called only if qcomp needs to shrink
+	  qcomp -= standardChangeInQcomp*2;
+	  crf -= standardChangeInCrf*2;
 	  qcompState = -1;
-	} else if(newdb < db && qcompState < 0) {
-	  qcomp += .05;
-	  crf += .1;
+	} else if(newdb < db && qcompState < 0) { //qcomp has been growing, but it's time to stop
+	  qcomp += standardChangeInQcomp;
+	  crf += standardChangeInCrf;
 	  qcompIteration += 5;
-	} else if(newdb < db && qcompState > 0) {
-	  qcomp -= .05;
-	  crf -= .1;
+	} else if(newdb < db && qcompState > 0) { //qcomp has been shrinking, but it's time to stop
+	  qcomp -= standardChangeInQcomp;
+	  crf -= standardChangeInCrf;
 	  qcompIteration += 5;
 	}
-
-	//debug information for qcomp will be printed here once the newer algorithm for qcomp is implimented
 	
-	//update important components of loop
-	db = newdb;
     qcompIteration++;
   }
   
@@ -727,34 +781,36 @@ int findRoughValues() {
 int main(int argci, char* argvi[])
 {
   printf("\n==================================================\nProgram Start\n");
-  //reading the config file is the first thing, because the config file has preference over the program defaults (set when setting the global variables), but the cli has precedent over the defaults file.
+  //read config file first, because it has lowest precedence
   if(readConfigFiles(argci,argvi) != 1)
     return -1; 
   
-  //create the .txt that will contain all b264 output and debugging information
+  //create the directory to store all log info
   mkdir(logdir);
+  
+  //create the log to put comprehensive information about the running of the program
   char b264logName[600];
-  snprintf(b264logName, sizeof(b264logName), "%s/b264log.txt", logdir);
+  snprintf(b264logName, sizeof(b264logName), "%s/b264log.log", logdir);
   b264log = fopen(b264logName, "w");
 
-  //print out how the program interpreted the config file. This is a debugging statement
+  //print out how the program interpreted the config file.
   snprintf(nextPartOfLog, sizeof(nextPartOfLog), "Configuration as read from the config files (cli for --config and --x264cur included):\nConfigloc: %s\nx264loc: %s\navs2yuvloc: %s\nlogdir: %s\nx264def: %s\nx264cur: %s\navs: %s\nbft: %g\npsize: %u\nmode: %u\ndeblock: %i:%i\naq: %i:%g\npsy-rd: %g:%g\nqcomp: %g\nme: %s:%u\nref: %u\nbframes: %u\ncrf: %g", configloc, x264loc, avs2yuvloc, logdir, x264defaults, x264current, initialavs, bframethreshold, psize, modetype, deblock_alpha, deblock_beta, aqmode, aqs, psyr, psyt, qcomp, me, merange, ref, bframes, crf);
   fputs(nextPartOfLog, b264log);
 
-  //read these second because they have highest priority
+  //read cli, because cli args have highest precedence
   if(readCliArgs(argci, argvi) != 1)
     return -1; 
 	
+  //print out final settings to confirm that everything works correctly	
   snprintf(nextPartOfLog, sizeof(nextPartOfLog), "\n\nConfiguration after reading cli:\nConfigloc: %s\nx264loc: %s\navs2yuvloc: %s\nlogdir: %s\nx264def: %s\nx264cur: %s\navs: %s\nbft: %g\npsize: %u\nmode: %u\ndeblock: %i:%i\naq: %i:%g\npsy-rd: %g:%g\nqcomp: %g\nme: %s:%u\nref: %u\nbframes: %u\ncrf: %g", configloc, x264loc, avs2yuvloc, logdir, x264defaults, x264current, initialavs, bframethreshold, psize, modetype, deblock_alpha, deblock_beta, aqmode, aqs, psyr, psyt, qcomp, me, merange, ref, bframes, crf);
   fputs(nextPartOfLog, b264log);
   
-  //find out all the stuff that doesn't require x264, and therefore runs quickly
-  //if the file isn't indexed, it might still take a while
+  //resolution, ref frames, etc. x264 is not called
   if(findEasyValues() != 1)
     return -1;
     
   //use x264 and the output to get a rough idea of the best settings
-  //should run comparatively quickly (encoding a total of maybe 40% of the movie)
+  //should run comparatively quickly (encoding a total of maybe 30% of the movie)
   if(findRoughValues() != 1)
     return -1;
   
